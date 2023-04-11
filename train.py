@@ -396,7 +396,7 @@ def train(epoch):
             pdb.set_trace()
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(net.parameters(), 10.)
+        torch.nn.utils.clip_grad_norm_(net.parameters(), 12.)
         optimizer.step()
         
 
@@ -408,7 +408,7 @@ def train(epoch):
         train_loss.update(loss_id2.item(), 2 * x1.size(0))
         id_loss.update(loss_id.item(), 2 * x1.size(0))
         id_loss_shape.update(loss_id_shape.item(), 2 * x1.size(0))
-        # id_loss_shape2.update(w1.item(), 2 * x1.size(0))
+        id_loss_shape2.update(w1.item(), 2 * x1.size(0))
         mutual_loss2.update(loss_kl_rgbir2.item(), 2 * x1.size(0))
         mutual_loss.update(loss_ortho.item(), 2 * x1.size(0))
         # kl_loss.update(loss_kl2.item()+loss_kl.item() , 2 * x1.size(0))
@@ -491,17 +491,7 @@ def test(epoch, net):
         cmc, mAP, mINP = eval_sysu(-distmat, query_label, gall_label, query_cam, gall_cam)
         cmc_att, mAP_att, mINP_att = eval_sysu(-distmat_att, query_label, gall_label, query_cam, gall_cam)
     print('Evaluation Time:\t {:.3f}'.format(time.time() - start))
-    # wandb.log({'rank1': cmc[0],
-    #             'mAP': mAP,
-    #             'rank1att': cmc_att[0],
-    #             'mAPatt': mAP_att,
-    #             },step=epoch)
-    # writer.add_scalar('rank1', cmc[0], epoch)
-    # writer.add_scalar('mAP', mAP, epoch)
-    # writer.add_scalar('mINP', mINP, epoch)
-    # writer.add_scalar('rank1_att', cmc_att[0], epoch)
-    # writer.add_scalar('mAP_att', mAP_att, epoch)
-    # writer.add_scalar('mINP_att', mINP_att, epoch)
+
     return cmc, mAP, mINP, cmc_att, mAP_att, mINP_att, cmc2, mAP2, mINP2, cmc_att2, mAP_att2, mINP_att2
 
 def test_shape(epoch, net):
@@ -569,12 +559,7 @@ def test_shape(epoch, net):
         # cmc_atts, mAP_atts, mINP_atts = eval_sysu(-distmat_att_shape, query_label_shape, gall_label_shape, query_cam_shape, gall_cam_shape)
     print('Evaluation Time:\t {:.3f}'.format(time.time() - start))
 
-    # writer.add_scalar('rank1', cmc[0], epoch)
-    # writer.add_scalar('mAP', mAP, epoch)
-    # writer.add_scalar('mINP', mINP, epoch)
-    # writer.add_scalar('rank1_att', cmc_att[0], epoch)
-    # writer.add_scalar('mAP_att', mAP_att, epoch)
-    # writer.add_scalar('mINP_att', mINP_att, epoch)
+
     cmcs, mAPs, mINPs, cmc_atts, mAP_atts, mINP_atts = 0,0,0,0,0,0
     return cmc, mAP, mINP, cmc_att, mAP_att, mINP_att, cmcs, mAPs, mINPs, cmc_atts, mAP_atts, mINP_atts
 def seed_worker(worker_id):
@@ -662,35 +647,16 @@ for epoch in range(start_epoch, 120 - start_epoch):
             'epoch': epoch,
         }
         torch.save(state, checkpoint_path + suffix + '_ema_best.t')
-    # # save model
-    # if dataset == 'sysu' and epoch > 40 and epoch % args.save_epoch == 0:
-        # state = {
-            # 'net': net.state_dict(),
-            # 'cmc': cmc,
-            # 'mAP': mAP,
-            # 'epoch': epoch,
-        # }
-        # torch.save(state, checkpoint_path + suffix + '_epoch_{}.t'.format(epoch))
 
     print('POOL:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
         cmc[0], cmc[4], cmc[9], cmc[19], mAP, mINP))
     print('FC:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
         cmc_att[0], cmc_att[4], cmc_att[9], cmc_att[19], mAP_att, mINP_att))
     print('Best Epoch [{}]'.format(best_epoch))
-    # print('shape: ')
-    # print('POOL:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
-    #     cmcs[0], cmcs[4], cmcs[9], cmcs[19], mAPs, mINPs))
-    # print('FC:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
-    #     cmc_atts[0], cmc_atts[4], cmc_atts[9], cmc_atts[19], mAP_atts, mINP_atts))
-        
+      
     print('------------------ema eval------------------')
     print('POOL:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
         cmc_ema[0], cmc_ema[4], cmc_ema[9], cmc_ema[19], mAP_ema, mINP_ema))
     print('FC:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
         cmc_att_ema[0], cmc_att_ema[4], cmc_att_ema[9], cmc_att_ema[19], mAP_att_ema, mINP_att_ema))
     print('Best Epoch [{}]'.format(best_epoch_ema))
-    # print('shape: ')
-    # print('POOL:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
-    #     cmcs_ema[0], cmcs_ema[4], cmcs_ema[9], cmcs_ema[19], mAPs_ema, mINPs_ema))
-    # print('FC:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
-    #     cmc_atts_ema[0], cmc_atts_ema[4], cmc_atts_ema[9], cmc_atts_ema[19], mAP_atts_ema, mINP_atts_ema))
