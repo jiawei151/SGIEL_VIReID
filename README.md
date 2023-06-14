@@ -28,9 +28,7 @@ To reproduce our results on SYSU-MM01, just run (after the dataset path declared
 bash run.sh
 ```
 
-We also uploaded a trained [model](https://drive.google.com/file/d/19LtgJ3p1xtCD4zU-_3OG8hrvMh2vKr_m/view?usp=sharing) using SGIEL.  
-
-Please feel free to contact me (fengjw151@gmail.com) if you need any further information.  
+We are currently working on Issues. Please feel free to contact me (fengjw151@gmail.com) if you need any other information.  
 
 ### Acknowledge  
 
