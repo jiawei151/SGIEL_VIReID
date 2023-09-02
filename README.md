@@ -11,7 +11,7 @@ For VCM-HITSZ, please refer to [its official repository](https://github.com/VCM-
 
 ### Body Shape Data
 
-We borrowed pre-trained Self-Correction Human Parsing ([SCHP](https://github.com/GoGoDuck912/Self-Correction-Human-Parsing)) model (pretrained on Pascal-Person-Part dataset) to segment body shape from background. Given a pixel of an visible or infrared image, we directly summed the probabilities of being a part of the head, torso, or limbs, predicted by SCHP, to create the body-shape map.  
+We borrowed pre-trained Self-Correction Human Parsing ([SCHP](https://github.com/GoGoDuck912/Self-Correction-Human-Parsing)) model (pretrained on Pascal-Person-Part dataset) to segment body shape from background. Given a pixel of a visible or infrared image, we directly summed the probabilities of being a part of the head, torso, or limbs, predicted by SCHP, to create the body-shape map.  
 
 
 ### Dependencies
@@ -28,7 +28,7 @@ To reproduce our results on SYSU-MM01, just run (after the dataset path declared
 bash run.sh
 ```
 
-We also uploaded a trained [model](https://drive.google.com/file/d/19LtgJ3p1xtCD4zU-_3OG8hrvMh2vKr_m/view?usp=sharing) using SGIEL.
+We are currently working on Issues. Please feel free to contact me (fengjw151@gmail.com) if you need any other information.  
 
 ### Acknowledge  
 
