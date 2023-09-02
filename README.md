@@ -30,6 +30,7 @@ bash run.sh
 
 We are currently working on Issues. Please feel free to contact me (fengjw151@gmail.com) if you need any other information.  
 
+We uploaded a trained [model](https://drive.google.com/file/d/1FSLhVCPynfOX_Ms3y4cwwNDYwZmLABAX/view?usp=drive_link) on SYSU-MM01.
 ### Acknowledge  
 
 Thanks for the great code base from the open-sourced [Cross-Modal-Re-ID-baseline](https://github.com/mangye16/Cross-Modal-Re-ID-baseline).
