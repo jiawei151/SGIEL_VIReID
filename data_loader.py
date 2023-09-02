@@ -108,12 +108,9 @@ class ChannelExchange(object):
         
 
 class SYSUData(data.Dataset):
-    def __init__(self, data_dir,  transform=None, colorIndex = None, thermalIndex = None):
+    def __init__(self, transform=None, colorIndex = None, thermalIndex = None, data_dir = None, data_dir1 = None):
         
-        data_dir = '/home/share/reid_dataset/SYSU-MM01/'
-        data_dir1 = '/home/share/fengjw/SYSU_MM01_SHAPE/'
-        data_dir2 = '/home/share/fengjw/SYSU_MM01_MASK/'
-        
+    
         # Load training images (path) and labels
         train_color_image = np.load(data_dir + 'train_rgb_resized_img.npy')
         self.train_color_label = np.load(data_dir + 'train_rgb_resized_label.npy')
@@ -134,7 +131,6 @@ class SYSUData(data.Dataset):
         self.train_color_image_shape   = train_color_image_shape
         self.train_thermal_image = train_thermal_image
         self.train_thermal_image_shape = train_thermal_image_shape
-        self.transform = transform
         self.cIndex = colorIndex
         self.tIndex = thermalIndex
         
@@ -174,7 +170,9 @@ class SYSUData(data.Dataset):
             # transforms.RandomGrayscale(p = 0.1),
             transforms.ToTensor(),
             normalize,
-            ChannelRandomErasing(probability = 0.5)])
+            ChannelRandomErasing(probability = 0.5),
+            ])
+        
             
         self.transform_color1 = transforms.Compose( [
             transforms.ToPILImage(),
@@ -185,8 +183,7 @@ class SYSUData(data.Dataset):
             normalize,
             ChannelRandomErasing(probability = 0.5),
             ChannelExchange(gray = 2)])
-        
-       
+
     def __getitem__(self, index):
 
         img1,  target1 = self.train_color_image[self.cIndex[index]],  self.train_color_label[self.cIndex[index]]
@@ -200,7 +197,6 @@ class SYSUData(data.Dataset):
             trans_rgb = self.transform_color
         else:
             trans_rgb = self.transform_color1
-        # trans_rgb = self.transform_color_simple
 
         img1 = trans_rgb(img1)
         img2 = self.transform_thermal(img2)
@@ -866,7 +862,7 @@ class VideoDataset_train(data.Dataset):
 
 
 class TestData(data.Dataset):
-    def __init__(self, test_img_file, test_label, transform=None, img_size = (144,288)):
+    def __init__(self, test_img_file, test_label, test_cam, transform=None, img_size = (144,288)):
 
         test_image = []
         for i in range(len(test_img_file)):
@@ -877,48 +873,17 @@ class TestData(data.Dataset):
         test_image = np.array(test_image)
         self.test_image = test_image
         self.test_label = test_label
+        self.test_cam = test_cam
         self.transform = transform
 
     def __getitem__(self, index):
-        img1,  target1 = self.test_image[index],  self.test_label[index]
+        img1,  target1, cam1 = self.test_image[index],  self.test_label[index], self.test_cam[index]
         img1 = self.transform(img1)
-        return img1, target1
+        return img1, target1, cam1
 
     def __len__(self):
         return len(self.test_image)
         
-class TestDataSYSU(data.Dataset):
-    def __init__(self, test_img_file, test_label, test_img_file_shape, test_label_shape, transform=None, img_size = (144,288)):
-
-        test_image = []
-        test_image_shape = []
-        assert len(test_img_file) == len(test_img_file_shape)
-        for i in range(len(test_img_file)):
-            assert test_label[i] == test_label_shape[i]
-            img = Image.open(test_img_file[i])
-            img_shape = Image.open(test_img_file_shape[i])
-            img = img.resize((img_size[0], img_size[1]), Image.ANTIALIAS)
-            img_shape = img_shape.resize((img_size[0], img_size[1]), Image.ANTIALIAS)
-            pix_array = np.array(img)
-            pix_array_shape = np.array(img_shape)
-            test_image.append(pix_array)
-            test_image_shape.append(pix_array_shape)
-        test_image = np.array(test_image)
-        test_image_shape = np.array(test_image_shape)
-        self.test_image = test_image
-        self.test_image_shape = test_image_shape
-        self.test_label = test_label
-        self.transform = transform
-
-    def __getitem__(self, index):
-        img1,  target1 = self.test_image[index],  self.test_label[index]
-        img2 = self.test_image_shape[index]
-        img1 = self.transform(img1)
-        img2 = self.transform(img2)
-        return img1, img2, target1
-
-    def __len__(self):
-        return len(self.test_image)
    
 class TestDataOld(data.Dataset):
     def __init__(self, data_dir, test_img_file, test_label, transform=None, img_size = (144,288)):

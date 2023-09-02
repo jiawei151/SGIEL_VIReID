@@ -157,3 +157,9 @@ cython_debug/
 # some logging file
 log/
 save_model/
+traindistill.py
+run.sh
+run2.sh
+testori.py
+eval_sysu.py
+pre_process*

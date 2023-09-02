@@ -2,7 +2,6 @@ from __future__ import print_function
 import argparse
 import sys
 import time
-from sklearn.cluster import estimate_bandwidth
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -12,16 +11,17 @@ import torch.utils.data as data
 import torchvision
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-from data_loader import SYSUData, RegDBData, TestDataSYSU, TestData
+from data_loader import SYSUData, TestData
 from data_manager import *
-from eval_metrics import eval_sysu, eval_regdb
+from eval_metrics import eval_sysu
 from model_bn import embed_net
 from utils import *
 import copy
-from loss import OriTripletLoss, TripletLoss_WRT, KLDivLoss, TripletLoss_ADP, pdist_torch, reweight_sce, sce, exchange_sce, shape_cpmt_cross_modal_ce
+from loss import OriTripletLoss, TripletLoss_WRT, TripletLoss_ADP, sce, shape_cpmt_cross_modal_ce
 # from tensorboardX import SummaryWriter
 from ChannelAug import ChannelAdap, ChannelAdapGray, ChannelRandomErasing
 import pdb
+import wandb
 
 parser = argparse.ArgumentParser(description='PyTorch Cross-Modality Training')
 parser.add_argument('--dataset', default='sysu', help='dataset name: regdb or sysu]')
@@ -54,49 +54,36 @@ parser.add_argument('--method', default='agw', type=str,
                     metavar='m', help='method type: base or agw, adp')
 parser.add_argument('--margin', default=0.3, type=float,
                     metavar='margin', help='triplet loss margin')
-parser.add_argument('--margin_shape', default=0.1, type=float,
-                    metavar='margin', help='triplet loss margin')
 parser.add_argument('--num_pos', default=4, type=int,
                     help='num of pos per identity in each modality')
 parser.add_argument('--trial', default=1, type=int,
                     metavar='t', help='trial (only for RegDB dataset)')
-parser.add_argument('--seed', default=0, type=int,
+parser.add_argument('--seed', default=3, type=int,
                     metavar='t', help='random seed')
 parser.add_argument('--gpu', default='0', type=str,
                     help='gpu device ids for CUDA_VISIBLE_DEVICES')
 parser.add_argument('--mode', default='all', type=str, help='all or indoor')
 
-parser.add_argument('--augc', default=0 , type=int,
-                    metavar='aug', help='use channel aug or not')
-parser.add_argument('--rande', default= 0 , type=float,
-                    metavar='ra', help='use random erasing or not and the probability')
-parser.add_argument('--kl', default= 1. , type=float,
-                    metavar='kl', help='use kl loss and the weight')
-parser.add_argument('--alpha', default=1 , type=int,
-                    metavar='alpha', help='magnification for the hard mining')
-parser.add_argument('--gamma', default=1 , type=int,
-                    metavar='gamma', help='gamma for the hard mining')
-parser.add_argument('--square', default= 1 , type=int,
-                    metavar='square', help='gamma for the hard mining')
-parser.add_argument('--date', default='sysu', help='dataset name: regdb or sysu]')
-parser.add_argument('--delta', default= 1e-3 , type=float,
-                    metavar='delta', help='gamma for the hard mining')
-      
+parser.add_argument('--date', default='12.22', help='date of exp')
+
+parser.add_argument('--gradclip', default= 11, type=float,
+            metavar='gradclip', help='gradient clip')
+parser.add_argument('--gpuversion', default= '3090', type=str, help='3090 or 4090')
+path_dict = {}
+path_dict['3090'] = ['/home/share/reid_dataset/SYSU-MM01/', '/home/share/fengjw/SYSU_MM01_SHAPE/']
+path_dict['4090'] = ['/home/jiawei/data/SYSU-MM01/', '/home/jiawei/data/SYSU_MM01_SHAPE/']
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-
-set_seed(args.seed)
+wandb.init(config=args, project='rgbir-reid2')
+args.method = args.method + "_gradclip" + str(args.gradclip) + "_seed" + str(args.seed)
+wandb.run.name = args.method
+# set_seed(args.seed)
 
 dataset = args.dataset
 if dataset == 'sysu':
-    data_path_shape = '/home/share/fengjw/SYSU_MM01_SHAPE/'
-    data_path = '/home/share/reid_dataset/SYSU-MM01/'
     log_path = args.log_path + 'sysu_log/'
     test_mode = [1, 2]  # thermal to visible
-elif dataset == 'regdb':
-    data_path = '/home/share/reid_dataset/RGB-IR_RegDB/'
-    log_path = args.log_path + 'regdb_log/'
-    test_mode = [1, 2]  # visible to thermal
+
 
 checkpoint_path = args.model_path
 
@@ -108,24 +95,16 @@ if not os.path.isdir(args.vis_log_path):
     os.makedirs(args.vis_log_path)
 
 suffix = dataset
-if args.method == 'adp':
-    suffix = suffix + '_{}_joint_co_nog_ch_nog_sq{}'.format(args.method, args.square)
-else:
-    suffix = suffix + '_{}'.format(args.method)
-suffix = suffix + '_KL_{}'.format(args.kl)
-# suffix = suffix + '_smargin_{}'.format(args.margin_shape)
-if args.augc==1:
-    suffix = suffix + '_aug_G'  
-if args.rande>0:
-    suffix = suffix + '_erase_{}'.format( args.rande)
-    
-suffix = suffix + '_p{}_n{}_lr_{}_seed_{}'.format( args.num_pos, args.batch_size, args.lr, args.seed)  
+# if args.method == 'adp':
+#     suffix = suffix + '_{}_joint_co_nog_ch_nog_sq{}'.format(args.method, args.square)
+# else:
+suffix = suffix + '_{}'.format(args.method)
+  
+suffix = suffix + '_p{}_n{}_lr_{}'.format( args.num_pos, args.batch_size, args.lr)  
 
 if not args.optim == 'sgd':
     suffix = suffix + '_' + args.optim
 
-if dataset == 'regdb':
-    suffix = suffix + '_trial_{}'.format(args.trial)
 
 sys.stdout = Logger(log_path + args.date + '/' + suffix + '_os.txt')
 
@@ -157,40 +136,27 @@ transform_test = transforms.Compose( [
     transforms.ToTensor(),
     normalize])
 
-if args.rande>0:
-    transform_train_list = transform_train_list + [ChannelRandomErasing(probability = args.rande)]
 
-if args.augc ==1:
-    # transform_train_list = transform_train_list +  [ChannelAdap(probability =0.5)]
-    transform_train_list = transform_train_list + [ChannelAdapGray(probability =0.5)]
-    
 transform_train = transforms.Compose( transform_train_list )
 
 end = time.time()
 if dataset == 'sysu':
     # training set
-    trainset = SYSUData(data_path, transform=transform_train)
+    trainset = SYSUData(data_dir=path_dict[args.gpuversion][0],data_dir1=path_dict[args.gpuversion][1])
     # generate the idx of each person identity
     color_pos, thermal_pos = GenIdx(trainset.train_color_label, trainset.train_thermal_label)
 
     # testing set
-    query_img, query_label, query_cam, query_img_shape, query_label_shape, query_cam_shape = process_query_sysu(data_path, mode=args.mode)
-    gall_img, gall_label, gall_cam, gall_img_shape, gall_label_shape, gall_cam_shape = process_gallery_sysu(data_path, mode=args.mode, trial=0)
+    query_img, query_label, query_cam = process_query_sysu(mode=args.mode,data_path_ori=path_dict[args.gpuversion][0])
+    # gall_img, gall_label, gall_cam = process_gallery_sysu_all(mode=args.mode,data_path_ori=path_dict[args.gpuversion][0])
+    gall_img, gall_label, gall_cam = process_gallery_sysu(mode=args.mode, trial=0, data_path_ori=path_dict[args.gpuversion][0]) 
 
-elif dataset == 'regdb':
-    # training set
-    trainset = RegDBData(data_path, args.trial, transform=transform_train)
-    # generate the idx of each person identity
-    color_pos, thermal_pos = GenIdx(trainset.train_color_label, trainset.train_thermal_label)
+set_seed(args.seed)
 
-    # testing set
-    query_img, query_label = process_test_regdb(data_path, trial=args.trial, modal='thermal')
-    gall_img, gall_label = process_test_regdb(data_path, trial=args.trial, modal='visible')
 
-gallset  = TestDataSYSU(gall_img, gall_label, gall_img_shape, gall_label_shape, transform=transform_test, img_size=(args.img_w, args.img_h))
-queryset = TestDataSYSU(query_img, query_label, query_img_shape, query_label_shape, transform=transform_test, img_size=(args.img_w, args.img_h))
-# gallset  = TestData(gall_img, gall_label, transform=transform_test, img_size=(args.img_w, args.img_h))
-# queryset = TestData(query_img, query_label, transform=transform_test, img_size=(args.img_w, args.img_h))
+
+gallset  = TestData(gall_img, gall_label, gall_cam, transform=transform_test, img_size=(args.img_w, args.img_h))
+queryset = TestData(query_img, query_label, query_cam, transform=transform_test, img_size=(args.img_w, args.img_h))
 
 # testing data loader
 gall_loader = data.DataLoader(gallset, batch_size=args.test_batch, shuffle=False, num_workers=args.workers)
@@ -236,31 +202,18 @@ if len(args.resume) > 0:
 
 # define loss function
 criterion_id = nn.CrossEntropyLoss()
-if args.method == 'agw':
+if 'agw' in args.method:
     criterion_tri = TripletLoss_WRT()
-    print('trip: wrt')
-    # loader_batch = args.batch_size * args.num_pos
-    # criterion_tri= OriTripletLoss(batch_size=loader_batch, margin=args.margin)
-elif args.method == 'adp':
-    criterion_tri = TripletLoss_ADP(alpha = args.alpha, gamma = args.gamma, square = args.square)
-    print('trip: adp')
-
 else:
     loader_batch = args.batch_size * args.num_pos
     criterion_tri= OriTripletLoss(batch_size=loader_batch, margin=args.margin)
-    # criterion_tri_shape= OriTripletLoss(batch_size=loader_batch, margin=args.margin_shape)
-    print('trip: ori')
-# criterion_kl = KLDivLoss()
 criterion_id.to(device)
 criterion_tri.to(device)
-# criterion_tri_shape.to(device)
-# criterion_kl.to(device)
 if args.optim == 'sgd':
     ignored_params = list(map(id, net.classifier.parameters()))
     ignored_params += list(map(id, net.bottleneck.parameters()))
     ignored_params += list(map(id, net.bottleneck_ir.parameters()))
     ignored_params += list(map(id, net.classifier_ir.parameters())) 
-    # print('#####larger lr for ir#####')
     if hasattr(net,'classifier_shape'):
         ignored_params += list(map(id, net.classifier_shape.parameters())) 
         ignored_params += list(map(id, net.bottleneck_shape.parameters())) 
@@ -282,25 +235,20 @@ if args.optim == 'sgd':
     optimizer = optim.SGD(params, weight_decay=5e-4, momentum=0.9, nesterov=True)
 
 
-# exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    
+
+    ema_w = 1000
     if epoch < 10:
         lr = args.lr * (epoch + 1) / 10
-        ema_w = 1000
     elif epoch >= 10 and epoch < 20:
         lr = args.lr
-        ema_w = 1000
-    elif epoch >= 20 and epoch < 50:
+    elif epoch >= 20 and epoch < 85:
         lr = args.lr * 0.1
-        ema_w = 1000 * args.lr / lr
-    elif epoch >= 50 and epoch < 100:
+        ema_w = 10000
+    elif epoch < 120:
         lr = args.lr * 0.01
-        ema_w = 1000 * args.lr / lr
-    elif epoch >= 100:
-        lr = args.lr * 0.001
-        ema_w = 1000 * args.lr / lr
+        ema_w = 100000
     optimizer.param_groups[0]['lr'] = 0.1*lr
     for i in range(len(optimizer.param_groups) - 1):
         optimizer.param_groups[i + 1]['lr'] = lr
@@ -319,6 +267,24 @@ def update_ema_variables(net, net_ema, alpha, global_step=None):
                     alpha_now = alpha
                 mygrad = new_param.data - ema_param.data
                 ema_param.data.add_(mygrad, alpha=alpha_now)
+
+def rand_bbox(size, lam):
+    W = size[2]
+    H = size[3]
+    cut_rat = np.sqrt(1. - lam)
+    cut_w = int(W * cut_rat)
+    cut_h = int(H * cut_rat)
+
+    # uniform
+    cx = np.random.randint(W)
+    cy = np.random.randint(H)
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    bby1 = np.clip(cy - cut_h // 2, 0, H)
+    bbx2 = np.clip(cx + cut_w // 2, 0, W)
+    bby2 = np.clip(cy + cut_h // 2, 0, H)
+
+    return bbx1, bby1, bbx2, bby2
 
 def train(epoch):
 
@@ -340,49 +306,78 @@ def train(epoch):
     net.train()
     net_ema.train()
     end = time.time()
-
-    for batch_idx, (x1, x1_shape, x2, x2_shape, y1, y2) in enumerate(trainloader):
-
+    for batch_idx, (inputs) in enumerate(trainloader):
+        x1, x1_shape, x2, x2_shape, y1, y2 = inputs
         y = torch.cat((y1, y2), 0)
         x1, x1_shape, x2, x2_shape, y1, y2, y = x1.cuda(), x1_shape.cuda(), x2.cuda(), x2_shape.cuda(), y1.cuda(), y2.cuda(), y.cuda()
                 
         data_time.update(time.time() - end)
 
+        cutmix_prob = np.random.rand(1)
+        if cutmix_prob < 0.2:
+        # generate mixed sample
+            x = torch.cat((x1, x2), 0)
+            x_shape = torch.cat((x1_shape, x2_shape), 0)
+            lam = np.random.beta(1, 1)
+            bbx1, bby1, bbx2, bby2 = rand_bbox(x.size(), lam)
 
-        outputs = net(x1, x2, x1_shape, x2_shape, y=y)
-        with torch.no_grad():
-            outputs_ema = net_ema(x1, x2, x1_shape, x2_shape, y=y)
+            rand_index = torch.randperm(y1.size()[0]).cuda()
+            target_a = y
+            target_b = torch.cat((y2[rand_index],y1[rand_index]), 0)
+            x[:, :, bbx1:bbx2, bby1:bby2] = torch.cat((x2[rand_index, :, bbx1:bbx2, bby1:bby2],x1[rand_index, :, bbx1:bbx2, bby1:bby2]),0)
+            x_shape[:, :, bbx1:bbx2, bby1:bby2] = torch.cat((x2_shape[rand_index, :, bbx1:bbx2, bby1:bby2],x1_shape[rand_index, :, bbx1:bbx2, bby1:bby2]),0)
 
-        # id loss
-        loss_id = criterion_id(outputs['rgbir']['logit'], y)
-        loss_id2 = criterion_id(outputs['rgbir']['logit2'], y)
-        loss_id_shape = criterion_id(outputs['shape']['logit'], y)
-        
-        # triplet loss
-        loss_tri, batch_acc = criterion_tri(outputs['rgbir']['bef'], y)
-        
-        # cross modal distill
-        loss_kl_rgbir = sce(outputs['rgbir']['logit'][:x1.shape[0]],outputs['rgbir']['logit'][x1.shape[0]:])+sce(outputs['rgbir']['logit'][x1.shape[0]:],outputs['rgbir']['logit'][:x1.shape[0]])
+            # adjust lambda to exactly match pixel ratio
+            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (x.size()[-1] * x.size()[-2]))
+            # compute output
+            outputs = net(x[:y1.shape[0]], x[y1.shape[0]:], x_shape[:y1.shape[0]], x_shape[y1.shape[0]:])
+            with torch.no_grad():
+                outputs_ema = net_ema(x[:y1.shape[0]], x[y1.shape[0]:], x_shape[:y1.shape[0]], x_shape[y1.shape[0]:])
+            
+            loss_id = criterion_id(outputs['rgbir']['logit'], target_a) * lam + criterion_id(outputs['rgbir']['logit'], target_b) * (1. - lam)
+            loss_id2 = torch.tensor([0]).cuda()
+            loss_id_shape = criterion_id(outputs['shape']['logit'], target_a) * lam + criterion_id(outputs['shape']['logit'], target_b) * (1. - lam)
+            loss_tri = torch.tensor([0]).cuda() 
+            loss_kl_rgbir = sce(outputs['rgbir']['logit'][:x1.shape[0]],outputs['rgbir']['logit'][x1.shape[0]:])+sce(outputs['rgbir']['logit'][x1.shape[0]:],outputs['rgbir']['logit'][:x1.shape[0]])
+            w1 = torch.tensor([1.]).cuda()
+            loss_estimate = torch.tensor([0]).cuda()
+            w2 = torch.tensor([1.]).cuda()
+            loss_kl_rgbir2 = torch.tensor([0]).cuda()
 
-        # shape complementary
-        loss_kl_rgbir2 = shape_cpmt_cross_modal_ce(x1, y1, outputs)
+        else:
+            with torch.no_grad():
+                outputs_ema = net_ema(x1, x2, x1_shape, x2_shape)
+            outputs = net(x1, x2, x1_shape, x2_shape)
 
-        # shape consistent
-        loss_estimate =  ((outputs['rgbir']['zp']-outputs_ema['shape']['zp'].detach()) ** 2).mean(1).mean() + sce(torch.mm(outputs['rgbir']['zp'], net.classifier_shape.weight.data.detach().t()), outputs_ema['shape']['logit'])
-        # loss_estimate =  ((outputs['rgbir']['zp']-outputs['shape']['zp'].detach()) ** 2).mean(1).mean() + sce(net.classifier_shape(outputs['rgbir']['zp']), outputs['shape']['logit'])
-        
+            # id loss
+            # if epoch < 40:
+            loss_id = criterion_id(outputs['rgbir']['logit'], y)
+            loss_id2 = criterion_id(outputs['rgbir']['logit2'], y)
+            loss_id_shape = criterion_id(outputs['shape']['logit'], y)
 
-        ############## reweighting ###############
-        compliment_grad = torch.autograd.grad(loss_id2+loss_kl_rgbir2, outputs['rgbir']['bef'], retain_graph=True)[0]
-        consistent_grad = torch.autograd.grad(loss_estimate, outputs['rgbir']['bef'], retain_graph=True)[0]
+            # triplet loss
+            loss_tri, batch_acc = criterion_tri(outputs['rgbir']['bef'], y)
+            
+            # cross modal distill
+            loss_kl_rgbir = sce(outputs['rgbir']['logit'][:x1.shape[0]],outputs['rgbir']['logit'][x1.shape[0]:])+sce(outputs['rgbir']['logit'][x1.shape[0]:],outputs['rgbir']['logit'][:x1.shape[0]])
+            # shape complementary
+            loss_kl_rgbir2 = shape_cpmt_cross_modal_ce(x1, y1, outputs)
 
-        with torch.no_grad():
-            compliment_grad_norm = (compliment_grad.norm(p=2,dim=-1)).mean()
-            consistent_grad_norm = (consistent_grad.norm(p=2,dim=-1)).mean()
-            w1 = consistent_grad_norm / (compliment_grad_norm+consistent_grad_norm) * 2
-            w2 = compliment_grad_norm / (compliment_grad_norm+consistent_grad_norm) * 2  
+            # shape consistent        
+            loss_estimate =  ((outputs['rgbir']['zp']-outputs_ema['shape']['zp'].detach()) ** 2).mean(1).mean() + sce(torch.mm(outputs['rgbir']['zp'], net.classifier_shape.weight.data.detach().t()), outputs_ema['shape']['logit'])
+            
 
-        ############## orthogonalize loss ###############
+            ############## reweighting ###############
+            compliment_grad = torch.autograd.grad(loss_id2+loss_kl_rgbir2, outputs['rgbir']['bef'], retain_graph=True)[0]
+            consistent_grad = torch.autograd.grad(loss_estimate, outputs['rgbir']['bef'], retain_graph=True)[0]
+
+            with torch.no_grad():
+                compliment_grad_norm = (compliment_grad.norm(p=2,dim=-1)).mean()
+                consistent_grad_norm = (consistent_grad.norm(p=2,dim=-1)).mean()
+                w1 = consistent_grad_norm / (compliment_grad_norm+consistent_grad_norm) * 2
+                w2 = compliment_grad_norm / (compliment_grad_norm+consistent_grad_norm) * 2  
+
+            ############## orthogonalize loss ###############
         proj_inner = torch.mm(F.normalize(net.projs[0], 2, 0).t(), F.normalize(net.projs[0], 2, 0))
         eye_label = torch.eye(net.projs[0].shape[1],device=device)
         loss_ortho = (proj_inner - eye_label).abs().sum(1).mean()
@@ -396,10 +391,9 @@ def train(epoch):
             pdb.set_trace()
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(net.parameters(), 12.)
+        torch.nn.utils.clip_grad_norm_(net.parameters(), args.gradclip)
         optimizer.step()
         
-
 
         update_ema_variables(net, net_ema, 1/ema_w)
 
@@ -433,135 +427,87 @@ def train(epoch):
                 train_loss=train_loss, id_loss=id_loss, id_loss_shape=id_loss_shape, id_loss_shape2=id_loss_shape2, mutual_loss=mutual_loss, mutual_loss2=mutual_loss2, kl_loss=kl_loss))
 
 
+def test(net):
+    pool_dim = 2048
+    def fliplr(img):
+        '''flip horizontal'''
+        inv_idx = torch.arange(img.size(3)-1,-1,-1,device=img.device).long()  # N x C x H x W
+        img_flip = img.index_select(3,inv_idx)
+        return img_flip
+    def extract_gall_feat(gall_loader):
+        net.eval()
+        print ('Extracting Gallery Feature...')
+        start = time.time()
+        ptr = 0
+        ngall = len(gall_loader.dataset)
+        gall_feat_pool = np.zeros((ngall, pool_dim))
+        gall_feat_fc = np.zeros((ngall, pool_dim))
+        with torch.no_grad():
+            for batch_idx, (input, label, cam) in enumerate(gall_loader):
+                batch_num = input.size(0)
+                input = Variable(input.cuda())
+                feat_pool, feat_fc = net(input, input, mode=test_mode[0])
+                input2 = fliplr(input)
+                feat_pool2, feat_fc2 = net(input2, input2, mode=test_mode[0])
+                feat_pool = (feat_pool+feat_pool2)/2
+                feat_fc = (feat_fc+feat_fc2)/2
 
-
-def test(epoch, net):
+                gall_feat_pool[ptr:ptr+batch_num,: ] = feat_pool.detach().cpu().numpy()
+                gall_feat_fc[ptr:ptr+batch_num,: ]   = feat_fc.detach().cpu().numpy()
+                ptr = ptr + batch_num
+        print('Extracting Time:\t {:.3f}'.format(time.time()-start))
+        return gall_feat_pool, gall_feat_fc
+    
+    def extract_query_feat(query_loader):
+        net.eval()
+        print ('Extracting Query Feature...')
+        start = time.time()
+        ptr = 0
+        nquery = len(query_loader.dataset)
+        query_feat_pool = np.zeros((nquery, pool_dim))
+        query_feat_fc = np.zeros((nquery, pool_dim))
+        with torch.no_grad():
+            for batch_idx, (input, label, cam) in enumerate(query_loader):
+                batch_num = input.size(0)
+                input = Variable(input.cuda())
+                feat_pool, feat_fc = net(input, input, mode=test_mode[1])
+                input2 = fliplr(input)
+                feat_pool2, feat_fc2 = net(input2, input2, mode=test_mode[1])
+                feat_pool = (feat_pool+feat_pool2)/2
+                feat_fc = (feat_fc+feat_fc2)/2
+                query_feat_pool[ptr:ptr+batch_num,: ] = feat_pool.detach().cpu().numpy()
+                query_feat_fc[ptr:ptr+batch_num,: ]   = feat_fc.detach().cpu().numpy()
+                ptr = ptr + batch_num         
+        print('Extracting Time:\t {:.3f}'.format(time.time()-start))
+        return query_feat_pool, query_feat_fc
     # switch to evaluation mode
     net.eval()
-    print('Extracting Gallery Feature...')
-    start = time.time()
-    ptr = 0
-    gall_feat = np.zeros((ngall, 2048))
-    gall_feat_att = np.zeros((ngall, 2048))
-    with torch.no_grad():
-        for batch_idx, (input, label) in enumerate(gall_loader):
-            batch_num = input.size(0)
-            input = Variable(input.cuda())
-            feat, feat_att = net(input, input, mode=test_mode[0])
-            gall_feat[ptr:ptr + batch_num, :] = feat.detach().cpu().numpy()
-            gall_feat_att[ptr:ptr + batch_num, :] = feat_att.detach().cpu().numpy()
-            ptr = ptr + batch_num
-    print('Extracting Time:\t {:.3f}'.format(time.time() - start))
+    query_feat_pool, query_feat_fc = extract_query_feat(query_loader)
 
-    # switch to evaluation
-    net.eval()
-    print('Extracting Query Feature...')
-    start = time.time()
-    ptr = 0
-    query_feat = np.zeros((nquery, 2048))
-    query_feat_att = np.zeros((nquery, 2048))
-    with torch.no_grad():
-        for batch_idx, (input, label) in enumerate(query_loader):
-            batch_num = input.size(0)
-            input = Variable(input.cuda())
-            # feat, feat_att = net(input, input, mode=test_mode[1])
-            feat, feat_att = net(input, input, mode=test_mode[1])
-            query_feat[ptr:ptr + batch_num, :] = feat.detach().cpu().numpy()
-            query_feat_att[ptr:ptr + batch_num, :] = feat_att.detach().cpu().numpy()
-            ptr = ptr + batch_num
-    print('Extracting Time:\t {:.3f}'.format(time.time() - start))
+    # gall_img, gall_label, gall_cam = process_gallery_sysu(mode=args.mode, trial=0)
 
-    start = time.time()
-    # compute the similarity
-    distmat = np.matmul(query_feat, np.transpose(gall_feat))
-    distmat_att = np.matmul(query_feat_att, np.transpose(gall_feat_att))
+    trial_gallset = TestData(gall_img, gall_label, gall_cam, transform=transform_test, img_size=(args.img_w, args.img_h))
+    trial_gall_loader = data.DataLoader(trial_gallset, batch_size=args.test_batch, shuffle=False, num_workers=4)
 
-    if dataset == 'regdb':
-        distmat2 = np.matmul(gall_feat, np.transpose(query_feat))
-        distmat_att2 = np.matmul(gall_feat_att, np.transpose(query_feat_att))
+    gall_feat_pool, gall_feat_fc = extract_gall_feat(trial_gall_loader)
+
+    # pool5 feature
+    distmat_pool = np.matmul(query_feat_pool, np.transpose(gall_feat_pool))
+    cmc_pool, mAP_pool, mINP_pool = eval_sysu(-distmat_pool, query_label, gall_label, query_cam, gall_cam)
+
+    # fc feature
+    distmat = np.matmul(query_feat_fc, np.transpose(gall_feat_fc))
+    cmc, mAP, mINP = eval_sysu(-distmat, query_label, gall_label, query_cam, gall_cam)
+    all_cmc = cmc
+    all_mAP = mAP
+    all_mINP = mINP
+    all_cmc_pool = cmc_pool
+    all_mAP_pool = mAP_pool
+    all_mINP_pool = mINP_pool
+    return all_cmc, all_mAP 
 
 
-    # evaluation
-    if dataset == 'regdb':
-        cmc, mAP, mINP      = eval_regdb(-distmat, query_label, gall_label)
-        cmc2, mAP2, mINP2      = eval_regdb(-distmat2, gall_label, query_label)
-        cmc_att, mAP_att, mINP_att  = eval_regdb(-distmat_att, query_label, gall_label)
-        cmc_att2, mAP_att2, mINP_att2  = eval_regdb(-distmat_att2, gall_label, query_label)
-    elif dataset == 'sysu':
-        cmc, mAP, mINP = eval_sysu(-distmat, query_label, gall_label, query_cam, gall_cam)
-        cmc_att, mAP_att, mINP_att = eval_sysu(-distmat_att, query_label, gall_label, query_cam, gall_cam)
-    print('Evaluation Time:\t {:.3f}'.format(time.time() - start))
 
-    return cmc, mAP, mINP, cmc_att, mAP_att, mINP_att, cmc2, mAP2, mINP2, cmc_att2, mAP_att2, mINP_att2
-
-def test_shape(epoch, net):
-    # switch to evaluation mode
-    net.eval()
-    print('Extracting Gallery Feature...')
-    start = time.time()
-    ptr = 0
-    gall_feat = np.zeros((ngall, 2048))
-    gall_feat_shape = np.zeros((ngall, 2048))
-    gall_feat_att = np.zeros((ngall, 2048))
-    gall_feat_att_shape = np.zeros((ngall, 2048))
-    with torch.no_grad():
-        for batch_idx, (input, input_shape, label) in enumerate(gall_loader):
-            batch_num = input.size(0)
-            input = Variable(input.cuda())
-            input_shape = Variable(input_shape.cuda())
-            feat, feat_att = net(input, input, mode=test_mode[0])
-            # feat_shape, feat_att_shape = net(input_shape, input_shape, input_shape, input_shape, mode=test_mode[0])
-            gall_feat[ptr:ptr + batch_num, :] = feat.detach().cpu().numpy()
-            # gall_feat_shape[ptr:ptr + batch_num, :] = feat_shape.detach().cpu().numpy()
-            gall_feat_att[ptr:ptr + batch_num, :] = feat_att.detach().cpu().numpy()
-            # gall_feat_att_shape[ptr:ptr + batch_num, :] = feat_att_shape.detach().cpu().numpy()
-            ptr = ptr + batch_num
-    print('Extracting Time:\t {:.3f}'.format(time.time() - start))
-
-    # switch to evaluation
-    net.eval()
-    print('Extracting Query Feature...')
-    start = time.time()
-    ptr = 0
-    query_feat = np.zeros((nquery, 2048))
-    query_feat_shape = np.zeros((nquery, 2048))
-    query_feat_att = np.zeros((nquery, 2048))
-    query_feat_att_shape = np.zeros((nquery, 2048))
-    with torch.no_grad():
-        for batch_idx, (input, input_shape, label) in enumerate(query_loader):
-            batch_num = input.size(0)
-            input = Variable(input.cuda())
-            input_shape = Variable(input_shape.cuda())
-            feat, feat_att = net(input, input, mode=test_mode[1])
-            # feat_shape, feat_att_shape = net(input_shape, input_shape, input_shape, input_shape, mode=test_mode[1])
-            query_feat[ptr:ptr + batch_num, :] = feat.detach().cpu().numpy()
-            # query_feat_shape[ptr:ptr + batch_num, :] = feat_shape.detach().cpu().numpy()
-            query_feat_att[ptr:ptr + batch_num, :] = feat_att.detach().cpu().numpy()
-            # query_feat_att_shape[ptr:ptr + batch_num, :] = feat_att_shape.detach().cpu().numpy()
-            ptr = ptr + batch_num
-    print('Extracting Time:\t {:.3f}'.format(time.time() - start))
-
-    start = time.time()
-    # compute the similarity
-    distmat = np.matmul(query_feat, np.transpose(gall_feat))
-    # distmat_shape = np.matmul(query_feat_shape, np.transpose(gall_feat_shape))
-    distmat_att = np.matmul(query_feat_att, np.transpose(gall_feat_att))
-    # distmat_att_shape = np.matmul(query_feat_att_shape, np.transpose(gall_feat_att_shape))
-
-    # evaluation
-    if dataset == 'regdb':
-        cmc, mAP, mINP      = eval_regdb(-distmat, query_label, gall_label)
-        cmc_att, mAP_att, mINP_att  = eval_regdb(-distmat_att, query_label, gall_label)
-    elif dataset == 'sysu':
-        cmc, mAP, mINP = eval_sysu(-distmat, query_label, gall_label, query_cam, gall_cam)
-        cmc_att, mAP_att, mINP_att = eval_sysu(-distmat_att, query_label, gall_label, query_cam, gall_cam)
-        # cmcs, mAPs, mINPs = eval_sysu(-distmat_shape, query_label_shape, gall_label_shape, query_cam_shape, gall_cam_shape)
-        # cmc_atts, mAP_atts, mINP_atts = eval_sysu(-distmat_att_shape, query_label_shape, gall_label_shape, query_cam_shape, gall_cam_shape)
-    print('Evaluation Time:\t {:.3f}'.format(time.time() - start))
-
-
-    cmcs, mAPs, mINPs, cmc_atts, mAP_atts, mINP_atts = 0,0,0,0,0,0
-    return cmc, mAP, mINP, cmc_att, mAP_att, mINP_att, cmcs, mAPs, mINPs, cmc_atts, mAP_atts, mINP_atts
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
@@ -589,8 +535,7 @@ for epoch in range(start_epoch, 120 - start_epoch):
                                   sampler=sampler, num_workers=args.workers, drop_last=True)
 
     # training
-    # if epoch == start_epoch:
-    #     pretrain(epoch)
+
     if epoch == 0:
         net_ema.load_state_dict(net.state_dict())
         print('init ema modal')
@@ -601,62 +546,46 @@ for epoch in range(start_epoch, 120 - start_epoch):
     print('Test Epoch: {}'.format(epoch))
 
     # testing
-    # cmc, mAP, mINP, cmc_att, mAP_att, mINP_att = test(epoch)
-    cmc, mAP, mINP, cmc_att, mAP_att, mINP_att, cmcs, mAPs, mINPs, cmc_atts, mAP_atts, mINP_atts = test_shape(epoch, net)
-    # wandb.log({'rank1': cmc[0],
-    #             'mAP': mAP,
-    #             'rank1att': cmc_att[0],
-    #             'mAPatt': mAP_att,
-    #             },step=epoch)
-    # wandb.log({'rank1_shape': cmcs[0],
-    #             'mAPs_shape': mAPs,
-    #             'rank1atts_shape': cmc_atts[0],
-    #             'mAPatt_shape': mAP_atts,
-    #             },step=epoch)
-    cmc_ema, mAP_ema, mINP_ema, cmc_att_ema, mAP_att_ema, mINP_att_ema, cmcs_ema, mAPs_ema, mINPs_ema, cmc_atts_ema, mAP_atts_ema, mINP_atts_ema = test_shape(epoch, net_ema)
-    # wandb.log({'rank1_ema': cmc_ema[0],
-    #             'mAP_ema': mAP_ema,
-    #             'rank1att_ema': cmc_att_ema[0],
-    #             'mAPatt_ema': mAP_att_ema,
-    #             },step=epoch)
-    # wandb.log({'rank1_shape_ema': cmcs_ema[0],
-    #             'mAPs_shape_ema': mAPs_ema,
-    #             'rank1atts_shape_ema': cmc_atts_ema[0],
-    #             'mAPatt_shape_ema': mAP_atts_ema,
-    #             },step=epoch)
+    cmc, mAP = test(net)
+    wandb.log({'rank1': cmc[0],
+                'mAP': mAP,
+                },step=epoch)
+    cmc_ema, mAP_ema = test(net_ema)
+    wandb.log({'rank1_ema': cmc_ema[0],
+                'mAP_ema': mAP_ema,
+                },step=epoch)
     # save model
-    if cmc_att[0] > best_acc:  # not the real best for sysu-mm01
-        best_acc = cmc_att[0]
+    if cmc[0] > best_acc: 
+        best_acc = cmc[0]
         best_epoch = epoch
         state = {
             'net': net.state_dict(),
-            'cmc': cmc_att,
-            'mAP': mAP_att,
-            'mINP': mINP_att,
+            'cmc': cmc,
+            'mAP': mAP,
             'epoch': epoch,
         }
         torch.save(state, checkpoint_path + suffix + '_best.t')
-    if cmc_att_ema[0] > best_acc_ema:  # not the real best for sysu-mm01
-        best_acc_ema = cmc_att_ema[0]
+    if cmc_ema[0] > best_acc_ema:  
+        best_acc_ema = cmc_ema[0]
         best_epoch_ema = epoch
         state = {
             'net': net_ema.state_dict(),
-            'cmc': cmc_att_ema,
-            'mAP': mAP_att_ema,
-            'mINP': mINP_att_ema,
+            'cmc': cmc_ema,
+            'mAP': mAP_ema,
             'epoch': epoch,
         }
         torch.save(state, checkpoint_path + suffix + '_ema_best.t')
+    if epoch % 5 == 0:
+        state = {
+            'net': net_ema.state_dict(),
+        }
+        torch.save(state, checkpoint_path + suffix + '_' + str(epoch) + '_.t')
 
-    print('POOL:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
-        cmc[0], cmc[4], cmc[9], cmc[19], mAP, mINP))
-    print('FC:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
-        cmc_att[0], cmc_att[4], cmc_att[9], cmc_att[19], mAP_att, mINP_att))
+    print('Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}'.format(
+        cmc[0], cmc[4], cmc[9], cmc[19], mAP))
     print('Best Epoch [{}]'.format(best_epoch))
       
     print('------------------ema eval------------------')
-    print('POOL:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
-        cmc_ema[0], cmc_ema[4], cmc_ema[9], cmc_ema[19], mAP_ema, mINP_ema))
-    print('FC:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
-        cmc_att_ema[0], cmc_att_ema[4], cmc_att_ema[9], cmc_att_ema[19], mAP_att_ema, mINP_att_ema))
+    print('Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}'.format(
+        cmc_ema[0], cmc_ema[4], cmc_ema[9], cmc_ema[19], mAP_ema))
     print('Best Epoch [{}]'.format(best_epoch_ema))

@@ -29,7 +29,7 @@ class Sequential(nn.Sequential):
     def forward(self, input, modal=0):
         for module in self:
             res = module(input, modal)
-            input = res[0]
+            input = res
         return res
 
 
@@ -119,31 +119,17 @@ class Bottleneck(nn.Module):
 
     def forward(self, x, modal=0):
         if modal == 0: # RGB
-            # if self.modalbn == 3:
-            #     bbn1 = self.bn1_modalx
-            #     bbn2 = self.bn2_modalx
-            #     bbn3 = self.bn3_modalx
-            #     if self.downsample is not None:
-            #         dsbn = self.dsbn_modalx
-            # else:
             bbn1 = self.bn1
             bbn2 = self.bn2
             bbn3 = self.bn3
             if self.downsample is not None:
                 dsbn = self.downsample[1]
         elif modal == 1: # IR
-            # if self.modalbn >= 2:
             bbn1 = self.bn1_ir
             bbn2 = self.bn2_ir
             bbn3 = self.bn3_ir
             if self.downsample is not None:
                 dsbn = self.dsbn_ir
-            # else:
-            #     bbn1 = self.bn1
-            #     bbn2 = self.bn2
-            #     bbn3 = self.bn3
-            #     if self.downsample is not None:
-            #         dsbn = self.downsample[1]
         elif modal == 2: # modalx
             bbn1 = self.bn1_modalx
             bbn2 = self.bn2_modalx
@@ -175,7 +161,7 @@ class Bottleneck(nn.Module):
         out += residual
         outt = F.relu(out)
 
-        return outt, out
+        return outt
 
 
 class ResNet(nn.Module):
@@ -233,15 +219,9 @@ class ResNet(nn.Module):
     def forward(self, x, modal=0):
         x = self.conv1(x)
         if modal == 0: # RGB
-            # if self.modalbn == 3:
-            #     bbn1 = self.bn1_rgb
-            # else:
             bbn1 = self.bn1
         elif modal == 1: # IR
-            # if self.modalbn >= 2:
             bbn1 = self.bn1_ir
-            # else:
-            #     bbn1 = self.bn1
         elif modal == 2: # modalx
             bbn1 = self.bn1_modalx
         elif modal == 3: # shape
@@ -254,9 +234,9 @@ class ResNet(nn.Module):
         x = self.maxpool(x)
 
         x = self.layer1(x, modal)
-        x = self.layer2(x[0], modal)
-        x = self.layer3(x[0], modal)
-        x = self.layer4(x[0], modal)
+        x = self.layer2(x, modal)
+        x = self.layer3(x, modal)
+        x = self.layer4(x, modal)
 
         return x
 
@@ -441,7 +421,7 @@ def resnet101(pretrained=False, **kwargs):
     model = ResNet(Bottleneck, [3, 4, 23, 3], **kwargs)
     if pretrained:
         model.load_state_dict(
-            remove_fc(model_zoo.load_url(model_urls['resnet101'])))
+            remove_fc(model_zoo.load_url(model_urls['resnet101'])),strict=False)
     return model
 
 
@@ -453,5 +433,5 @@ def resnet152(pretrained=False, **kwargs):
     model = ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
     if pretrained:
         model.load_state_dict(
-            remove_fc(model_zoo.load_url(model_urls['resnet152'])))
+            remove_fc(model_zoo.load_url(model_urls['resnet152'])), strict=False)
     return model

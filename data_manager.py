@@ -3,16 +3,14 @@ import os
 import numpy as np
 import random
 
-def process_query_sysu(data_path, mode = 'all', relabel=False):
+def process_query_sysu(mode = 'all', relabel=False,data_path_ori = '/home/share/reid_dataset/SYSU-MM01/'):
     if mode== 'all':
         ir_cameras = ['cam3','cam6']
     elif mode =='indoor':
         ir_cameras = ['cam3','cam6']
-    data_path_ori = '/home/share/reid_dataset/SYSU-MM01/'
-    data_path = '/home/share/fengjw/SYSU_MM01_SHAPE/'
+    
 
     file_path = os.path.join(data_path_ori,'exp/test_id.txt')
-    files_shape = []
     files_ir = []
 
     with open(file_path, 'r') as file:
@@ -23,32 +21,19 @@ def process_query_sysu(data_path, mode = 'all', relabel=False):
     for id in sorted(ids):
         for cam in ir_cameras:
             img_dir = os.path.join(data_path_ori,cam,id)
-            img_dir_shape = os.path.join(data_path,cam,id)
             if os.path.isdir(img_dir):
                 new_files = sorted([img_dir+'/'+i for i in os.listdir(img_dir)])
                 files_ir.extend(new_files)
-            if os.path.isdir(img_dir_shape):
-                new_files_shape = sorted([img_dir_shape+'/'+i for i in os.listdir(img_dir_shape)])
-                files_shape.extend(new_files_shape)
     query_img = []
     query_id = []
     query_cam = []
-    query_img_shape = []
-    query_id_shape = []
-    query_cam_shape = []
     for img_path in files_ir:
         camid, pid = int(img_path[-15]), int(img_path[-13:-9])
         query_img.append(img_path)
         query_id.append(pid)
         query_cam.append(camid)
-    for img_path in files_shape:
-        camid, pid = int(img_path[-15]), int(img_path[-13:-9])
-        query_img_shape.append(img_path)
-        query_id_shape.append(pid)
-        query_cam_shape.append(camid)
-    return query_img, np.array(query_id), np.array(query_cam), query_img_shape, np.array(query_id_shape), np.array(query_cam_shape)
-
-def process_gallery_sysu(data_path, mode = 'all', trial = 0, relabel=False):
+    return query_img, np.array(query_id), np.array(query_cam)
+def process_gallery_sysu(mode = 'all', trial = 0, data_path_ori = '/home/share/reid_dataset/SYSU-MM01/'):
     
     random.seed(trial)
     
@@ -56,11 +41,9 @@ def process_gallery_sysu(data_path, mode = 'all', trial = 0, relabel=False):
         rgb_cameras = ['cam1','cam2','cam4','cam5']
     elif mode =='indoor':
         rgb_cameras = ['cam1','cam2']
-    data_path_ori = '/home/share/reid_dataset/SYSU-MM01/'
-    data_path = '/home/share/fengjw/SYSU_MM01_SHAPE/'
+    
     file_path = os.path.join(data_path_ori,'exp/test_id.txt')
     files_rgb = []
-    files_shape = []
     with open(file_path, 'r') as file:
         ids = file.read().splitlines()
         ids = [int(y) for y in ids[0].split(',')]
@@ -72,29 +55,45 @@ def process_gallery_sysu(data_path, mode = 'all', trial = 0, relabel=False):
                 new_files = sorted([img_dir+'/'+i for i in os.listdir(img_dir)])
                 files_rgb.append(random.choice(new_files))
 
-    for id in sorted(ids):
-        for cam in rgb_cameras:
-            img_dir_shape = os.path.join(data_path,cam,id)
-            if os.path.isdir(img_dir_shape):
-                new_files_shape = sorted([img_dir_shape+'/'+i for i in os.listdir(img_dir_shape)])
-                files_shape.append(random.choice(new_files_shape))
     gall_img = []
     gall_id = []
     gall_cam = []
-    query_img_shape = []
-    query_id_shape = []
-    query_cam_shape = []
     for img_path in files_rgb:
         camid, pid = int(img_path[-15]), int(img_path[-13:-9])
         gall_img.append(img_path)
         gall_id.append(pid)
         gall_cam.append(camid)
-    for img_path in files_shape:
+    return gall_img, np.array(gall_id), np.array(gall_cam)
+
+def process_gallery_sysu_all(mode = 'all', data_path_ori = '/home/share/reid_dataset/SYSU-MM01/'):    
+    if mode== 'all':
+        rgb_cameras = ['cam1','cam2','cam4','cam5']
+    elif mode =='indoor':
+        rgb_cameras = ['cam1','cam2']
+    
+    file_path = os.path.join(data_path_ori,'exp/test_id.txt')
+    files_rgb = []
+    with open(file_path, 'r') as file:
+        ids = file.read().splitlines()
+        ids = [int(y) for y in ids[0].split(',')]
+        ids = ["%04d" % x for x in ids]
+    for id in sorted(ids):
+        for cam in rgb_cameras:
+            img_dir = os.path.join(data_path_ori,cam,id)
+            if os.path.isdir(img_dir):
+                new_files = sorted([img_dir+'/'+i for i in os.listdir(img_dir)])
+                # files_rgb.append(random.choice(new_files))
+                files_rgb.extend(new_files)
+
+    gall_img = []
+    gall_id = []
+    gall_cam = []
+    for img_path in files_rgb:
         camid, pid = int(img_path[-15]), int(img_path[-13:-9])
-        query_img_shape.append(img_path)
-        query_id_shape.append(pid)
-        query_cam_shape.append(camid)
-    return gall_img, np.array(gall_id), np.array(gall_cam), query_img_shape, np.array(query_id_shape), np.array(query_cam_shape)
+        gall_img.append(img_path)
+        gall_id.append(pid)
+        gall_cam.append(camid)
+    return gall_img, np.array(gall_id), np.array(gall_cam)
     
 def process_test_regdb(img_dir, trial = 1, modal = 'visible'):
     if modal=='visible':

@@ -6,7 +6,7 @@ import os
 
 data_path = '/home/share/reid_dataset/SYSU-MM01/'
 data_path1 = '/home/share/fengjw/SYSU_MM01_SHAPE/'
-data_path2 = '/home/share/fengjw/SYSU_MM01_MASK/'
+data_path2 = '/home/share/fengjw/SYSU-MM01_SHAPE_composepow/'
 
 
 rgb_cameras = ['cam1','cam2','cam4','cam5']
@@ -100,30 +100,39 @@ def read_imgs(train_image):
         pid = pid2label[pid]
         train_label.append(pid)
     return np.array(train_img), np.array(train_label)
-       
+
 # rgb imges
-train_img, train_label = read_imgs(files_rgb)
-np.save(data_path + 'train_rgb_resized_img.npy', train_img)
-np.save(data_path + 'train_rgb_resized_label.npy', train_label)
+rgb_img, rgb_label = read_imgs(files_rgb)
+rgb_img_shape, rgb_label_shape = read_imgs(files_rgb_shape)
+train_img, train_label = read_imgs(files_ir)
+train_img_shape, train_label_shape = read_imgs(files_ir_shape)
 
-train_img, train_label = read_imgs(files_rgb_shape)
-np.save(data_path1 + 'train_rgb_resized_img.npy', train_img)
-np.save(data_path1 + 'train_rgb_resized_label.npy', train_label)
+def func(img, img_shape):
+    res = []
+    shape_mean = img_shape.mean()
+    imgsize = 288*144
+    for i in range(img.shape[0]):
+        tmp = (img_shape[i][:,:,0]>shape_mean).sum()/imgsize
+        res.append(tmp)
+    return np.array(res)
 
-train_img, train_label = read_imgs(files_rgb_mask)
-np.save(data_path2 + 'train_rgb_resized_img.npy', train_img)
-np.save(data_path2 + 'train_rgb_resized_label.npy', train_label)
+res_rgb = func(rgb_img, rgb_img_shape)
+res_ir = func(train_img, train_img_shape)
+thres_rgb = 0.1
+thres_ir = 0.01
 
+np.save(data_path + 'train_rgb_resized_img_new.npy', rgb_img[res_rgb>thres_rgb])
+np.save(data_path + 'train_rgb_resized_label_new.npy', rgb_label[res_rgb>thres_rgb])
+
+np.save(data_path1 + 'train_rgb_resized_img_new.npy', rgb_img_shape[res_rgb>thres_rgb])
+np.save(data_path1 + 'train_rgb_resized_label_new.npy', rgb_label_shape[res_rgb>thres_rgb])
 
 # ir imges
-train_img, train_label = read_imgs(files_ir)
-np.save(data_path + 'train_ir_resized_img.npy', train_img)
-np.save(data_path + 'train_ir_resized_label.npy', train_label)
 
-train_img, train_label = read_imgs(files_ir_shape)
-np.save(data_path1 + 'train_ir_resized_img.npy', train_img)
-np.save(data_path1 + 'train_ir_resized_label.npy', train_label)
 
-train_img, train_label = read_imgs(files_ir_mask)
-np.save(data_path2 + 'train_ir_resized_img.npy', train_img)
-np.save(data_path2 + 'train_ir_resized_label.npy', train_label)
+np.save(data_path + 'train_ir_resized_img_new.npy', train_img[res_ir>thres_ir])
+np.save(data_path + 'train_ir_resized_label_new.npy', train_label[res_ir>thres_ir])
+
+np.save(data_path1 + 'train_ir_resized_img_new.npy', train_img_shape[res_ir>thres_ir])
+np.save(data_path1 + 'train_ir_resized_label_new.npy', train_label_shape[res_ir>thres_ir])
+

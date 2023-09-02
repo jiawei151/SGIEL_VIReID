@@ -168,166 +168,40 @@ class TripletLoss_ADP(nn.Module):
         return loss, correct
 
 
-class KLDivLoss(nn.Module):
-    def __init__(self):
-        super(KLDivLoss, self).__init__()
-    def forward(self, pred, label):
-        # pred: 2D matrix (batch_size, num_classes)
-        # label: 1D vector indicating class number
-        T=3
-
-        predict = F.log_softmax(pred/T,dim=1)
-        target_data = F.softmax(label/T,dim=1)
-        target_data =target_data+10**(-7)
-        target = Variable(target_data.data.cuda(),requires_grad=False)
-        loss=T*T*((target*(target.log()-predict)).sum(1).sum()/target.size()[0])
-        return loss
 
 def sce(new_logits, old_logits):
     loss_ke_ce = (- F.softmax(old_logits, dim=1).detach() * F.log_softmax(new_logits,dim=1)).mean(0).sum()
     return loss_ke_ce
 
-def reweight_sce(new_logits, old_logits, w):
-    loss_ke_ce = ((- F.softmax(old_logits, dim=1).detach() * F.log_softmax(new_logits,dim=1)).sum(1)*w).mean()
-    return loss_ke_ce
 
-def sce_nodetach(new_logits, old_logits):
-    loss_ke_ce = (- F.softmax(old_logits, dim=1) * F.log_softmax(new_logits,dim=1)).mean(0).sum()
-    return loss_ke_ce
-def exchange_sce(new_logits, old_logits, y):
 
-    positions = torch.arange(new_logits.shape[0])
-    assert (y[positions%2==0] == y[positions%2==1]).all()
-    loss_ke_ce1 = (- F.softmax(old_logits[positions%2==1], dim=1).detach() * F.log_softmax(new_logits[positions%2==0],dim=1)).sum()
-    loss_ke_ce2 = (- F.softmax(old_logits[positions%2==0], dim=1).detach() * F.log_softmax(new_logits[positions%2==1],dim=1)).sum()
-    return (loss_ke_ce1+loss_ke_ce2)/ y.shape[0]
 
-def softmax_mse_loss(input_logits, target_logits):
-    assert input_logits.size() == target_logits.size()
-    input_softmax = F.softmax(input_logits, dim=1)
-    # input_softmax = input_logits
-    target_softmax = F.softmax(target_logits, dim=1)
-    # target_softmax = target_logits
-    return F.mse_loss(input_softmax, target_softmax, reduction='sum')/ input_softmax.shape[0]
 
-def feat_distill_loss(feat_1, feat_2):
-    L1_loss = torch.nn.L1Loss()
-    return L1_loss(cosine_similarity(feat_1,feat_1), cosine_similarity(feat_2.detach(),feat_2.detach()))
-
-def cosine_similarity(fea1, feat2):
-    input1_normed = F.normalize(fea1, p=2, dim=1)
-    input2_normed = F.normalize(feat2, p=2, dim=1)
-    distmat = torch.mm(input1_normed, input2_normed.t())
-    return distmat
-
-def similarity_preserve_loss(input, target, t=5):
-    n = input.size(0)
-    target = target
-    input_view = F.normalize(input, 2, 1).view(n, -1)
-    target_view = F.normalize(target, 2, 1).view(n, -1)
-
-    target_view_inner = target_view.mm(target_view.t()).view(n, n)
-    input_view_inner = input_view.mm(input_view.t())
-    target_view_inner = target_view_inner
-    # input_view_inner_nodiag = torch.zeros(n, n-1).cuda()
-    # target_view_inner_nodiag = torch.zeros(n, n-1).cuda()
-
-    # for i in range(n):
-    #     ind = [ii for ii in range(n)]
-    #     ind.pop(i)
-    #     input_view_inner_nodiag[i] = input_view_inner[i][ind]
-    #     target_view_inner_nodiag[i] = target_view_inner[i][ind]
-
-    # x_logsm = F.log_softmax(input_view_inner_nodiag*t, dim = 1)
-    # y_sm = F.softmax(target_view_inner_nodiag*t, dim=1)
-    # y_logsm = F.log_softmax(target_view_inner_nodiag*t, dim = 1)
-    # loss = (y_sm*(y_logsm - x_logsm)).sum(1).mean()
-    loss = ((input_view_inner - target_view_inner)**2).sum(1).mean()
-    # loss = F.l1_loss(input_view_inner, target_view_inner, reduction='sum')/ input_view_inner.shape[0]
-    return loss
-
-def contrastive_loss(feat1,feat2):
-    # positive logits: Nx1
-    feat1 = F.normalize(feat1, p=2, dim=1)
-    feat2 = F.normalize(feat2, p=2, dim=1).detach()
-    
-    # l_pos = torch.einsum('nc,nc->n', [feat1, feat2]).unsqueeze(-1)
-    # negative logits: NxK
-    logits = torch.einsum('nc,ck->nk', [feat1, feat2.t()])
-    batch = logits.shape[0]
-
-    eps = torch.eye(batch, device=logits.device)
-    eps[eps==1] = -0.1
-    eps[eps==0] = 0.1
-
-    labels = torch.arange(batch, device=logits.device, dtype=torch.long)
-    loss = F.cross_entropy(logits+eps, labels, reduction="mean")
-    return loss
-    
-
-def shape_cpmt_cross_modal_ce(x1,y1,outputs, w=None):
+def shape_cpmt_cross_modal_ce(x1,y1,outputs):
     
     with torch.no_grad():
         batch_size = y1.shape[0]
-        # rgb_shape_pow = torch.pow(outputs['shape']['zp'][:x1.shape[0]], 2).sum(dim=1, keepdim=True).expand(batch_size, batch_size)
-        # ir_shape_pow = torch.pow(outputs['shape']['zp'][x1.shape[0]:], 2).sum(dim=1, keepdim=True).expand(batch_size, batch_size).t()
-        # rgb_ir_shape_cossim = rgb_shape_pow + ir_shape_pow
-        # rgb_ir_shape_cossim.addmm_(outputs['shape']['zp'][:x1.shape[0]], outputs['shape']['zp'][x1.shape[0]:].t(), beta=1, alpha=-2)
         
         rgb_shape_normed = F.normalize(outputs['shape']['zp'][:x1.shape[0]], p=2, dim=1)
         ir_shape_normed = F.normalize(outputs['shape']['zp'][x1.shape[0]:], p=2, dim=1)
         rgb_ir_shape_cossim = torch.mm(rgb_shape_normed,ir_shape_normed.t())
         mask = y1.expand(batch_size,batch_size).eq(y1.expand(batch_size, batch_size).t())
         target4rgb, target4ir = [], []
-        # target4rgb2, target4ir2 = [], []
-        # target4rgb3, target4ir3 = [], []
-        # target4rgb4, target4ir4 = [], []
-        idx_temp = torch.arange(batch_size)
+        # idx_temp = torch.arange(batch_size)
+        idx_temp = torch.arange(batch_size,device=rgb_shape_normed.device)
         for i in range(batch_size):
             sorted_idx_rgb = rgb_ir_shape_cossim[i][mask[i]].sort(descending=False)[1]
             sorted_idx_ir = rgb_ir_shape_cossim.t()[i][mask.t()[i]].sort(descending=False)[1]
             target4rgb.append(idx_temp[mask[i]][sorted_idx_rgb[0]].unsqueeze(0))
-            # target4rgb2.append(idx_temp[mask[i]][sorted_idx_rgb[1]].unsqueeze(0))
-            # target4rgb3.append(idx_temp[mask[i]][sorted_idx_rgb[2]].unsqueeze(0))
-            # target4rgb4.append(idx_temp[mask[i]][sorted_idx_rgb[3]].unsqueeze(0))
             target4ir.append(idx_temp[mask.t()[i]][sorted_idx_ir[0]].unsqueeze(0))
-            # target4ir2.append(idx_temp[mask.t()[i]][sorted_idx_ir[1]].unsqueeze(0))
-            # target4ir3.append(idx_temp[mask.t()[i]][sorted_idx_ir[2]].unsqueeze(0))
-            # target4ir4.append(idx_temp[mask.t()[i]][sorted_idx_ir[3]].unsqueeze(0))
-
         target4rgb = torch.cat(target4rgb)
-        # target4rgb2 = torch.cat(target4rgb2)
-        # target4rgb3 = torch.cat(target4rgb3)
-        # target4rgb4 = torch.cat(target4rgb4)
         target4ir = torch.cat(target4ir)
-        # target4ir2 = torch.cat(target4ir2)
-        # target4ir3 = torch.cat(target4ir3)
-        # target4ir4 = torch.cat(target4ir4)
-    if w is None:
-        loss_top1 = sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:][target4rgb]) + sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]][target4ir])
-    else:
-        loss_top1 = reweight_sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:][target4rgb],w[:x1.shape[0]]) + reweight_sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]][target4ir], w[x1.shape[0]:])
+    loss_top1 = sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:][target4rgb]) + sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]][target4ir])
     
-    # loss_top2 = sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:][target4rgb2]) + sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]][target4ir2])
-    # loss_top3 = sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:][target4rgb3]) + sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]][target4ir3])
-    # loss_top4 = sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:][target4rgb4]) + sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]][target4ir4])
-    if w is None:
-        # center1 = []
-        # center2 = []
-        # for i in range(0,y1.shape[0], 4):
-        #     center1.append(outputs['rgbir']['logit2'][:y1.shape[0]][y1 == y1[i]].mean(0))
-        #     center2.append(outputs['rgbir']['logit2'][y1.shape[0]:][y1 == y1[i]].mean(0))
-        # center1 = torch.stack(center1)
-        # center2 = torch.stack(center2)
 
-        # loss_center2 = sce(center1, center2) + sce(center2, center1)
-        # loss_kl_rgbir2 = loss_top1 + loss_center2
-        loss_random = sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:])+sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]])
-        # w1 = (loss_random.item())/(loss_random.item()+loss_top1.item())
-        # w2 = (loss_top1.item())/(loss_random.item()+loss_top1.item())
-        loss_kl_rgbir2 = loss_random+loss_top1
-    # else:
-    #     loss_kl_rgbir2 = loss_top1 + reweight_sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:], w[:x1.shape[0]])+reweight_sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]],w[x1.shape[0]:])
+    loss_random = sce(outputs['rgbir']['logit2'][:x1.shape[0]],outputs['rgbir']['logit2'][x1.shape[0]:])+sce(outputs['rgbir']['logit2'][x1.shape[0]:],outputs['rgbir']['logit2'][:x1.shape[0]])
+
+    loss_kl_rgbir2 = loss_random+loss_top1
 
     return loss_kl_rgbir2
 
